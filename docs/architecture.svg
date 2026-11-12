@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="1040" viewBox="0 0 1120 1040" role="img" aria-labelledby="title desc">
+<title id="title">MowEO architecture</title>
+<desc id="desc">CDSE openEO acquisition and preprocessing, downloaded NetCDF cubes, local mowing detection using private grassland masks, and spatial and temporal outputs.</desc>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#59747f"/></marker></defs>
+<rect width="1120" height="1040" fill="#f7f9fa"/>
+<g font-family="Arial, sans-serif" text-anchor="middle" fill="#152f3b">
+<text x="560" y="47" font-size="30" font-weight="bold">MowEO</text>
+<text x="560" y="79" font-size="19">Automated Grassland Mowing Detection Using Sentinel-2 and openEO</text>
+<g fill="#e6f1f6" stroke="#aac3cf" stroke-width="1.5">
+<rect x="250" y="110" width="620" height="110" rx="14"/>
+<rect x="250" y="260" width="620" height="110" rx="14"/>
+</g>
+<g fill="#edf4ec" stroke="#b2c9b0" stroke-width="1.5">
+<rect x="250" y="460" width="620" height="110" rx="14"/>
+<rect x="250" y="620" width="620" height="120" rx="14"/>
+<rect x="250" y="800" width="620" height="125" rx="14"/>
+</g>
+<g font-size="23" font-weight="bold">
+<text x="560" y="150">Sentinel-2 / CDSE openEO</text>
+<text x="560" y="300">Cloud preprocessing</text>
+<text x="560" y="500">Local mowing detection</text>
+<text x="560" y="660">Spatial and temporal results</text>
+<text x="560" y="841">GeoTIFF / CSV / GeoPackage</text>
+</g>
+<g font-size="17" fill="#47606b">
+<text x="560" y="181">AOI or country boundary, CRS, year and stable 5 km tile IDs</text>
+<text x="560" y="204">SENTINEL2_L2A; user account and credits</text>
+<text x="560" y="331">SCL dilation, NDVI (10 m), NDII and SWIRMean (20 m)</text>
+<text x="560" y="355">Annual NetCDF index cubes per 5 km tile</text>
+<text x="560" y="531">NDVI drop and regrowth; spatial and spectral support</text>
+<text x="560" y="555">User-owned detection and inner statistics masks</text>
+<text x="560" y="692">Detected event dates, mowing counts and diagnostics</text>
+<text x="560" y="717">Evidence scores are not calibrated probabilities</text>
+<text x="560" y="874">Pixel rasters, event tables and tile-level QA summaries</text>
+<text x="560" y="900">Count mosaic and outputs for further analysis</text>
+</g>
+<g stroke="#59747f" stroke-width="2" marker-end="url(#arrow)">
+<path d="M560,225 V253"/><path d="M560,375 V450"/>
+<path d="M560,575 V610"/><path d="M560,745 V790"/>
+</g>
+<rect x="300" y="396" width="520" height="35" rx="8" fill="#f7f9fa"/>
+<text x="560" y="420" font-size="16" fill="#59747f">DOWNLOAD / LOCAL STAGE BOUNDARY</text>
+<text x="560" y="970" font-size="17">One package: moweo acquire + moweo process, or moweo run --run</text>
+<text x="560" y="1001" font-size="15" fill="#59747f">Private masks and reference observations are not distributed.</text>
+</g></svg>

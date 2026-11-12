@@ -1,0 +1,38 @@
+# Local project configuration (paths/year)
+project_config.json
+
+# Secrets / authentication caches
+.openeo_auth/
+**/.openeo_auth/
+**/refresh_tokens.json
+
+# Input datasets are not distributed with the code
+data/**
+!data/README.md
+*.zip
+*.nc
+*.tif
+*.gpkg
+*.geojson
+data/*.gpkg
+data/patch_ids.txt
+data/grass_detection/
+data/grass_stats/
+
+# Generated outputs
+workspace/
+output_*/
+*.part
+*.part.nc
+
+# Python / editor
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

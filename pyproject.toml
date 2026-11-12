@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moweo"
+version = "0.2.0a2"
+description = "Automated Grassland Mowing Detection Using Sentinel-2 and openEO"
+readme = "README.md"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[project.scripts]
+moweo = "moweo.cli:main"
+
+[tool.setuptools]
+packages = ["moweo"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.package-data]
+moweo = ["project_config.example.json"]

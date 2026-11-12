@@ -9,8 +9,8 @@ This repository is a prerelease source distribution, not a published DOI release
 | Automated verification | Offline source/installed-wheel tests passed; CI configuration included but not yet run on GitHub. |
 | Explanatory illustrations | Architecture diagram included; additional real-output illustrations are planned separately. |
 | Software license | Not assigned. The owner has deferred selection. |
-| Scientific application | Regional calibration and version-linked independent validation remain necessary for accuracy claims. |
-| Public repository and DOI | No public upload, tagged DOI archive or DOI citation metadata is claimed. |
+| Scientific application | Delivery-reference v0.3 core and twelve product definitions ported; regional calibration and independent validation remain necessary for accuracy claims. |
+| Public repository and DOI | Earlier MowEO 0.2.x prerelease is public; this 0.3.0a1 update is prepared locally. DOI archival remains pending. |
 
 Before a formal reusable open-source release, the owner must select the software
 license, confirm rights to the inherited implementation, provide authorship and

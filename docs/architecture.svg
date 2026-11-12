@@ -32,7 +32,7 @@
 <text x="560" y="692">Detected event dates, mowing counts and diagnostics</text>
 <text x="560" y="717">Evidence scores are not calibrated probabilities</text>
 <text x="560" y="874">Pixel rasters, event tables and tile-level QA summaries</text>
-<text x="560" y="900">Count mosaic and outputs for further analysis</text>
+<text x="560" y="900">Raw / SEIVE counts, DOY 1-6, confidence and observation quality</text>
 </g>
 <g stroke="#59747f" stroke-width="2" marker-end="url(#arrow)">
 <path d="M560,225 V253"/><path d="M560,375 V450"/>

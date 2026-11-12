@@ -48,8 +48,12 @@ def main() -> None:
     for label, cmd in steps:
         run(label, cmd, args.dry_run)
 
+    if not args.dry_run:
+        from .provenance import record
+        record('processing_complete')
+
     print("\nProcessing pipeline complete.")
-    print("Final mosaic:", cfg.PROCESS_ROOT.parent / "national_maps" / f"{cfg.OUTPUT_PREFIX}_MOWING_COUNT_{cfg.YEAR}_detection_plus5m.tif")
+    print("SEIVE count:", cfg.PROCESS_ROOT.parent / "national_maps" / f"{cfg.OUTPUT_PREFIX}_MOWING_COUNT_SEIVE_{cfg.YEAR}.tif")
 
 
 if __name__ == "__main__":

@@ -78,7 +78,18 @@ class OfflineWorkflow(unittest.TestCase):
                     ds.to_netcdf(dest / f'{row.PATCH_ID}_{suffix}_2021.nc', engine='h5netcdf')
             run('03_acquire.py')  # dry run must not need account authentication
             run('14_run_processing.py', '--workers', '1')
-            mosaic = project / 'workspace/2021/processing/national_maps/AREA_MOWING_COUNT_2021_detection_plus5m.tif'
+            event_tables = list((project / 'workspace/2021/processing/process_eopatch').glob('*/*FINAL_events*.csv'))
+            self.assertEqual(len(event_tables), 2)
+            frames = [pd.read_csv(path) for path in event_tables]
+            events = pd.concat([frame for frame in frames if len(frame)], ignore_index=True)
+            spectral_score = events.spectral_code.map({0: 0, 1: 50, 2: 50, 3: 100})
+            expected_score = (0.30 * events.signal_quality_score + 0.25 * events.observation_density_score
+                              + 0.20 * events.child_support + 0.25 * spectral_score)
+            self.assertTrue(np.allclose(events.event_confidence, expected_score))
+            checks = pd.read_csv(project / 'workspace/2021/processing/national_analysis_2021/tables/event_scan_checks_2021.csv')
+            self.assertEqual(set(checks.STATUS), {'OK'})
+            self.assertTrue((checks.EXPECTED == checks.SCANNED).all())
+            mosaic = project / 'workspace/2021/processing/national_maps/AREA_MOWING_COUNT_2021.tif'
             self.assertTrue(mosaic.with_name('AREA_TILE_QA_2021.gpkg').exists())
             self.assertTrue(list((project / 'workspace/2021/provenance').glob('*.json')))
             with rasterio.open(mosaic) as ds:
@@ -87,6 +98,17 @@ class OfflineWorkflow(unittest.TestCase):
                 self.assertEqual(ds.nodata, 255)
                 self.assertEqual(set(np.unique(values)), {0, 1, 255})
                 self.assertTrue((values[:, 500:1000] == 255).all())
+            manifest = json.loads((mosaic.parent / 'products_manifest.json').read_text())
+            self.assertEqual(len(manifest), 12)
+            for product in manifest:
+                with rasterio.open(mosaic.parent / product['file']) as src:
+                    self.assertEqual(src.dtypes[0], product['dtype'])
+                    self.assertEqual(src.nodata, product['nodata'])
+                    self.assertTrue((src.read(1)[:, 500:1000] == product['nodata']).all())
+            with rasterio.open(mosaic.with_name('AREA_MOWING_DOY_1_2021.tif')) as src:
+                self.assertEqual(set(np.unique(src.read(1))), {0, times[4].dayofyear, 65535})
+            with rasterio.open(mosaic.with_name('AREA_SCL_MASKED_PERCENT_2021.tif')) as src:
+                self.assertEqual(set(np.unique(src.read(1))), {-9999, 0})
             # A missing final product must fail rather than publish a partial mosaic.
             next((project / 'workspace/2021/processing/process_eopatch').glob('*/*MOWING_FINAL_v*.tif')).unlink()
             run('13_mosaic.py', success=False)

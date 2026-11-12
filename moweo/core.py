@@ -18,6 +18,9 @@ from .config import (
     DATE_TOLERANCE, MOWING_START, MOWING_END,
     PRE_START_DAYS, PRE_END_DAYS, EVENT_BEFORE_DAYS, EVENT_AFTER_DAYS,
     CHILD_DATE_TOLERANCE,
+    EVENT_CONFIRM_PRE_WINDOW_DAYS, EVENT_CONFIRM_PRE_MIN_OBS,
+    EVENT_CONFIRM_PRE_RANGE_MAX, EVENT_CONFIRM_START_MEDIAN_TOL,
+    LOCAL_OBS_WINDOW_DAYS,
 )
 
 NODATA_OUT = -9999.0
@@ -50,7 +53,7 @@ def read_patch_table(csv_path: Path) -> pd.DataFrame:
     if "HAS_GRASS" not in df.columns:
         raise KeyError(
             f"HAS_GRASS missing from {csv_path}. "
-            "Re-run 09_prepare_processing.py."
+            "Re-run moweo validate."
         )
     for field in [
         "HAS_GRASS", "HAS_DETECTION_GRASS", "HAS_STATS_GRASS",
@@ -172,6 +175,81 @@ def postprocess_mowing_events(events):
     return filtered
 
 
+def _event_context_metrics(t: pd.DatetimeIndex, f: np.ndarray, pk: int, vl: int, rec: int) -> dict:
+    """Event-local sampling and shape metrics used by v0.2 confirmation/confidence."""
+    bottom = t[vl]
+    gap_before = int((t[vl] - t[vl - 1]).days) if vl > 0 else np.nan
+    gap_after = int((t[vl + 1] - t[vl]).days) if vl + 1 < len(t) else np.nan
+
+    local_mask = (t >= bottom - pd.Timedelta(days=LOCAL_OBS_WINDOW_DAYS)) & (t <= bottom + pd.Timedelta(days=LOCAL_OBS_WINDOW_DAYS))
+    local_obs_count = int(local_mask.sum())
+
+    pre_mask = (t >= bottom - pd.Timedelta(days=EVENT_CONFIRM_PRE_WINDOW_DAYS)) & (t < bottom)
+    pre_vals = f[pre_mask]
+    pre_obs_count = int(len(pre_vals))
+    if pre_obs_count:
+        pre_range = float(np.nanmax(pre_vals) - np.nanmin(pre_vals))
+        pre_median = float(np.nanmedian(pre_vals))
+    else:
+        pre_range = np.nan
+        pre_median = np.nan
+
+    drop = float(f[pk] - f[vl])
+    recovery = float(f[rec] - f[vl])
+
+    # Event confirmation evidence:
+    # 1) the original detector already requires a recovery > DROP_THR*GROW_R;
+    # 2) v0.3 records pre-event stability as evidence but does not reject
+    #    otherwise valid drop + recovery candidates solely because the
+    #    pre-event segment is sparse or moderately variable.
+    pre_supported = pre_obs_count >= EVENT_CONFIRM_PRE_MIN_OBS
+    pre_stable = (
+        pre_supported
+        and np.isfinite(pre_range)
+        and pre_range <= EVENT_CONFIRM_PRE_RANGE_MAX
+        and np.isfinite(pre_median)
+        and float(f[pk]) >= pre_median - EVENT_CONFIRM_START_MEDIAN_TOL
+    )
+
+    return {
+        "gap_before": gap_before,
+        "gap_after": gap_after,
+        "local_observation_count": local_obs_count,
+        "pre_observation_count": pre_obs_count,
+        "pre_range": pre_range,
+        "pre_median": pre_median,
+        "pre_stable": bool(pre_stable),
+        "recovery_strength": recovery,
+        "drop_strength": drop,
+    }
+
+
+def observation_density_score(gap_before, gap_after, local_observation_count) -> float:
+    """0-100 event-local observation-density score using the agreed high/medium/low rules."""
+    if not np.isfinite(gap_before) or not np.isfinite(gap_after):
+        return 0.0
+    if gap_before <= 10 and gap_after <= 10 and local_observation_count >= 4:
+        return 100.0
+    if gap_before <= 20 and gap_after <= 20 and local_observation_count >= 3:
+        return 65.0
+    return 30.0
+
+
+def signal_quality_score(drop_strength, recovery_strength, pre_range, pre_stable) -> float:
+    """0-100 shape score; diagnostic evidence, not a calibrated probability."""
+    drop_scale = max(0.20 - DROP_THR, 1e-6)
+    drop_score = 100.0 * np.clip((float(drop_strength) - DROP_THR) / drop_scale, 0.0, 1.0)
+    rec_thr = DROP_THR * GROW_R
+    rec_score = 100.0 * np.clip(float(recovery_strength) / max(rec_thr * 1.5, 1e-6), 0.0, 1.0)
+    if np.isfinite(pre_range):
+        stability_score = 100.0 * np.clip(1.0 - float(pre_range) / max(EVENT_CONFIRM_PRE_RANGE_MAX, 1e-6), 0.0, 1.0)
+    else:
+        stability_score = 0.0
+    if not pre_stable:
+        stability_score = min(stability_score, 25.0)
+    return float(0.40 * drop_score + 0.35 * rec_score + 0.25 * stability_score)
+
+
 def detect_mowing_sgs(
     dates,
     values,
@@ -286,6 +364,14 @@ def detect_mowing_sgs(
         if mowing_end is not None and bottom > mowing_end:
             continue
 
+        metrics = _event_context_metrics(t, f, pk, vl, rec)
+        density_score = observation_density_score(
+            metrics["gap_before"], metrics["gap_after"], metrics["local_observation_count"]
+        )
+        sig_score = signal_quality_score(
+            metrics["drop_strength"], metrics["recovery_strength"], metrics["pre_range"], metrics["pre_stable"]
+        )
+
         events.append({
             "event_start": event_start,
             "bottom_timestamp": bottom,
@@ -297,10 +383,12 @@ def detect_mowing_sgs(
             "duration": duration,
             "num_observations": n_obs,
             "doy": int(bottom.dayofyear),
+            **metrics,
+            "observation_density_score": density_score,
+            "signal_quality_score": sig_score,
         })
 
     return postprocess_mowing_events(events), valid_obs, max_gap_days
-
 
 def write_baseline(
     baseline_tif: Path,
@@ -317,6 +405,14 @@ def write_baseline(
     max_gap_arr,
     observation_support,
     provisional_confidence,
+    event_gap_before,
+    event_gap_after,
+    event_local_obs_count,
+    event_pre_range,
+    event_pre_stable,
+    event_recovery_strength,
+    event_density_score,
+    event_signal_quality,
 ):
     bands, names = [], []
 
@@ -342,6 +438,14 @@ def write_baseline(
     add_band(max_gap_arr, "MAX_GAP_DAYS", True)
     add_band(observation_support, "OBSERVATION_SUPPORT")
     add_band(provisional_confidence, "PROVISIONAL_CONFIDENCE")
+    for i in range(MAX_EVENTS): add_band(event_gap_before[i], f"EVENT_GAP_BEFORE_{i+1}")
+    for i in range(MAX_EVENTS): add_band(event_gap_after[i], f"EVENT_GAP_AFTER_{i+1}")
+    for i in range(MAX_EVENTS): add_band(event_local_obs_count[i], f"EVENT_LOCAL_OBS_{i+1}")
+    for i in range(MAX_EVENTS): add_band(event_pre_range[i], f"EVENT_PRE_RANGE_{i+1}")
+    for i in range(MAX_EVENTS): add_band(event_pre_stable[i], f"EVENT_PRE_STABLE_{i+1}")
+    for i in range(MAX_EVENTS): add_band(event_recovery_strength[i], f"EVENT_RECOVERY_{i+1}")
+    for i in range(MAX_EVENTS): add_band(event_density_score[i], f"EVENT_DENSITY_SCORE_{i+1}")
+    for i in range(MAX_EVENTS): add_band(event_signal_quality[i], f"EVENT_SIGNAL_SCORE_{i+1}")
 
     profile = grass_profile.copy()
     profile.update(
@@ -357,7 +461,7 @@ def write_baseline(
             dst.set_band_description(i, name)
         dst.update_tags(
             PRODUCT="NDVI mowing detection baseline",
-            VERSION="v1.1",
+            VERSION="v1.3",
             PATCH_ID=str(patch_id),
             YEAR=str(YEAR),
             METHOD="NDVI_SGS_baseline",
@@ -378,6 +482,14 @@ def write_baseline(
                 "0.6*MEAN_EVENT_SUPPORT + 0.4*OBSERVATION_SUPPORT - 10*LOW_SUPPORT_EVENTS"
             ),
             PROVISIONAL_CONFIDENCE_NOTE="Diagnostic indicator only; not calibrated probability",
+            EVENT_CONFIRMATION=(
+                f"Recovery>{DROP_THR * GROW_R:.4f}; pre-event stability retained as confidence evidence: "
+                f">= {EVENT_CONFIRM_PRE_MIN_OBS} observations "
+                f"within {EVENT_CONFIRM_PRE_WINDOW_DAYS} d; pre-range <= {EVENT_CONFIRM_PRE_RANGE_MAX}; "
+                f"event-start >= pre-median-{EVENT_CONFIRM_START_MEDIAN_TOL}; not a hard rejection filter"
+            ),
+            EVENT_DENSITY_HIGH="gap_before<=10 & gap_after<=10 & local_obs(+/-20d)>=4",
+            EVENT_DENSITY_MEDIUM="gap_before<=20 & gap_after<=20 & local_obs(+/-20d)>=3",
             MAX_EVENTS_STORED=str(MAX_EVENTS),
             COUNT_POLICY="MOWING_COUNT capped to MAX_EVENTS_STORED for output consistency",
             GRASS_MASK_ROLE="detection +5m",
@@ -403,6 +515,14 @@ def load_baseline_arrays(path: Path):
         + [f"NDVI_DROP_{i}" for i in range(1, MAX_EVENTS + 1)]
         + [f"MOWING_SUPPORT_{i}" for i in range(1, MAX_EVENTS + 1)]
         + ["MEAN_EVENT_SUPPORT", "LOW_SUPPORT_EVENTS", "VALID_OBS", "MAX_GAP_DAYS", "OBSERVATION_SUPPORT", "PROVISIONAL_CONFIDENCE"]
+        + [f"EVENT_GAP_BEFORE_{i}" for i in range(1, MAX_EVENTS + 1)]
+        + [f"EVENT_GAP_AFTER_{i}" for i in range(1, MAX_EVENTS + 1)]
+        + [f"EVENT_LOCAL_OBS_{i}" for i in range(1, MAX_EVENTS + 1)]
+        + [f"EVENT_PRE_RANGE_{i}" for i in range(1, MAX_EVENTS + 1)]
+        + [f"EVENT_PRE_STABLE_{i}" for i in range(1, MAX_EVENTS + 1)]
+        + [f"EVENT_RECOVERY_{i}" for i in range(1, MAX_EVENTS + 1)]
+        + [f"EVENT_DENSITY_SCORE_{i}" for i in range(1, MAX_EVENTS + 1)]
+        + [f"EVENT_SIGNAL_SCORE_{i}" for i in range(1, MAX_EVENTS + 1)]
     )
     missing = [x for x in required if x not in names]
     if missing:
@@ -426,6 +546,14 @@ def load_baseline_arrays(path: Path):
         "max_gap_days": clean("MAX_GAP_DAYS"),
         "observation_support": clean("OBSERVATION_SUPPORT"),
         "baseline_confidence": clean("PROVISIONAL_CONFIDENCE"),
+        "event_gap_before": np.stack([clean(f"EVENT_GAP_BEFORE_{i}") for i in range(1, MAX_EVENTS + 1)]),
+        "event_gap_after": np.stack([clean(f"EVENT_GAP_AFTER_{i}") for i in range(1, MAX_EVENTS + 1)]),
+        "event_local_obs_count": np.stack([clean(f"EVENT_LOCAL_OBS_{i}") for i in range(1, MAX_EVENTS + 1)]),
+        "event_pre_range": np.stack([clean(f"EVENT_PRE_RANGE_{i}") for i in range(1, MAX_EVENTS + 1)]),
+        "event_pre_stable": np.stack([clean(f"EVENT_PRE_STABLE_{i}") for i in range(1, MAX_EVENTS + 1)]),
+        "event_recovery_strength": np.stack([clean(f"EVENT_RECOVERY_{i}") for i in range(1, MAX_EVENTS + 1)]),
+        "event_density_score": np.stack([clean(f"EVENT_DENSITY_SCORE_{i}") for i in range(1, MAX_EVENTS + 1)]),
+        "event_signal_quality": np.stack([clean(f"EVENT_SIGNAL_SCORE_{i}") for i in range(1, MAX_EVENTS + 1)]),
     }
     return arrays, meta
 
@@ -468,6 +596,14 @@ def build_baseline(patch_id: str, grass_file: Path, ndvi_nc: Path, baseline_tif:
     valid_obs_arr = np.full((height, width), NODATA_U16, dtype=np.uint16)
     max_gap_arr = np.full((height, width), NODATA_U16, dtype=np.uint16)
     ndvi_drops = np.zeros((MAX_EVENTS, height, width), dtype=np.float32)
+    event_gap_before = np.full((MAX_EVENTS, height, width), np.nan, dtype=np.float32)
+    event_gap_after = np.full((MAX_EVENTS, height, width), np.nan, dtype=np.float32)
+    event_local_obs_count = np.full((MAX_EVENTS, height, width), np.nan, dtype=np.float32)
+    event_pre_range = np.full((MAX_EVENTS, height, width), np.nan, dtype=np.float32)
+    event_pre_stable = np.full((MAX_EVENTS, height, width), np.nan, dtype=np.float32)
+    event_recovery_strength = np.full((MAX_EVENTS, height, width), np.nan, dtype=np.float32)
+    event_density_score = np.full((MAX_EVENTS, height, width), np.nan, dtype=np.float32)
+    event_signal_quality = np.full((MAX_EVENTS, height, width), np.nan, dtype=np.float32)
 
     grass_pixels = grass == 1
     mowing_count[grass_pixels] = 0
@@ -507,6 +643,14 @@ def build_baseline(patch_id: str, grass_file: Path, ndvi_nc: Path, baseline_tif:
         for i, event in enumerate(kept):
             mowing_doys[i, r, c] = event["doy"]
             ndvi_drops[i, r, c] = event["value_drop"]
+            event_gap_before[i, r, c] = event.get("gap_before", np.nan)
+            event_gap_after[i, r, c] = event.get("gap_after", np.nan)
+            event_local_obs_count[i, r, c] = event.get("local_observation_count", np.nan)
+            event_pre_range[i, r, c] = event.get("pre_range", np.nan)
+            event_pre_stable[i, r, c] = 1.0 if event.get("pre_stable", False) else 0.0
+            event_recovery_strength[i, r, c] = event.get("recovery_strength", np.nan)
+            event_density_score[i, r, c] = event.get("observation_density_score", np.nan)
+            event_signal_quality[i, r, c] = event.get("signal_quality_score", np.nan)
 
     def get_pixel_doys(row, col):
         vals = mowing_doys[:, row, col]
@@ -572,6 +716,8 @@ def build_baseline(patch_id: str, grass_file: Path, ndvi_nc: Path, baseline_tif:
         mowing_count, mowing_doys, ndvi_drops, mowing_support,
         mean_event_support, low_support_events, valid_obs_arr, max_gap_arr,
         observation_support, provisional_confidence,
+        event_gap_before, event_gap_after, event_local_obs_count, event_pre_range, event_pre_stable,
+        event_recovery_strength, event_density_score, event_signal_quality,
     )
 
     return {
@@ -589,6 +735,14 @@ def build_baseline(patch_id: str, grass_file: Path, ndvi_nc: Path, baseline_tif:
         "max_gap_days": max_gap_arr.astype(np.float32),
         "observation_support": observation_support,
         "baseline_confidence": provisional_confidence,
+        "event_gap_before": event_gap_before,
+        "event_gap_after": event_gap_after,
+        "event_local_obs_count": event_local_obs_count,
+        "event_pre_range": event_pre_range,
+        "event_pre_stable": event_pre_stable,
+        "event_recovery_strength": event_recovery_strength,
+        "event_density_score": event_density_score,
+        "event_signal_quality": event_signal_quality,
     }
 
 
@@ -804,7 +958,7 @@ def finalize_patch(patch_id: str, grass_file: Path, baseline_tif: Path, indices2
     arrays, baseline_meta = load_baseline_arrays(baseline_tif)
 
     if np.any(np.isfinite(arrays["mowing_count"]) & (arrays["mowing_count"] > MAX_EVENTS)):
-        raise RuntimeError("Baseline has MOWING_COUNT > MAX_EVENTS. Re-run 10_process_mowing.py --force.")
+        raise RuntimeError("Baseline has MOWING_COUNT > MAX_EVENTS. Re-run moweo detect --force.")
 
     mowing_count = arrays["mowing_count"]
     mowing_doys = arrays["mowing_doys"]
@@ -814,6 +968,14 @@ def finalize_patch(patch_id: str, grass_file: Path, baseline_tif: Path, indices2
     max_gap_days = arrays["max_gap_days"]
     observation_support = arrays["observation_support"]
     baseline_confidence = arrays["baseline_confidence"]
+    event_gap_before = arrays["event_gap_before"]
+    event_gap_after = arrays["event_gap_after"]
+    event_local_obs_count = arrays["event_local_obs_count"]
+    event_pre_range = arrays["event_pre_range"]
+    event_pre_stable = arrays["event_pre_stable"]
+    event_recovery_strength = arrays["event_recovery_strength"]
+    event_density_score = arrays["event_density_score"]
+    event_signal_quality = arrays["event_signal_quality"]
 
     dates20, ndii20, swir20 = load_indices20(indices20_nc, grass_bounds)
 
@@ -858,7 +1020,21 @@ def finalize_patch(patch_id: str, grass_file: Path, baseline_tif: Path, indices2
                 spectral_code = 0
 
             spectral_score = spectral_score_from_code(spectral_code)
-            event_conf = np.mean([float(base_conf), float(child_support), float(spectral_score)]) if np.isfinite(base_conf) else np.nan
+            density_score = event_density_score[i, r, c]
+            signal_score = event_signal_quality[i, r, c]
+            # v0.3: event-specific confidence. This is an evidence score (0-100), not a calibrated probability.
+            components = [
+                (signal_score, 0.30),
+                (density_score, 0.25),
+                (child_support, 0.20),
+                (spectral_score, 0.25),
+            ]
+            valid_components = [(float(v), w) for v, w in components if np.isfinite(v)]
+            if valid_components:
+                wsum = sum(w for _, w in valid_components)
+                event_conf = sum(v * w for v, w in valid_components) / wsum
+            else:
+                event_conf = np.nan
             event_class = confidence_class(event_conf, spectral_code)
             ndvi_drop = ndvi_drops[i, r, c]
             miletich_flag = int(np.isfinite(ndvi_drop) and ndvi_drop > 0.20 and swir_confirm)
@@ -884,16 +1060,27 @@ def finalize_patch(patch_id: str, grass_file: Path, baseline_tif: Path, indices2
                 "spectral_code": spectral_code,
                 "spectral_offset_days": spectral_offset,
                 "miletich_flag": miletich_flag,
+                "gap_before": float(event_gap_before[i, r, c]) if np.isfinite(event_gap_before[i, r, c]) else np.nan,
+                "gap_after": float(event_gap_after[i, r, c]) if np.isfinite(event_gap_after[i, r, c]) else np.nan,
+                "local_observation_count": float(event_local_obs_count[i, r, c]) if np.isfinite(event_local_obs_count[i, r, c]) else np.nan,
+                "pre_range": float(event_pre_range[i, r, c]) if np.isfinite(event_pre_range[i, r, c]) else np.nan,
+                "pre_stable": float(event_pre_stable[i, r, c]) if np.isfinite(event_pre_stable[i, r, c]) else np.nan,
+                "recovery_strength": float(event_recovery_strength[i, r, c]) if np.isfinite(event_recovery_strength[i, r, c]) else np.nan,
+                "observation_density_score": float(density_score) if np.isfinite(density_score) else np.nan,
+                "signal_quality_score": float(signal_score) if np.isfinite(signal_score) else np.nan,
                 "event_confidence": event_conf,
                 "event_class": event_class,
             })
 
-    events_final = pd.DataFrame(event_rows, columns=[
-        'PATCH_ID', 'row', 'col', 'event', 'doy', 'event_date', 'ndvi_drop',
-        'neighbour_support', 'baseline_confidence', 'child_support', 'ndii_drop',
-        'swir_rise', 'spectral_code', 'spectral_offset_days', 'miletich_flag',
-        'event_confidence', 'event_class',
-    ])
+    event_columns = [
+        "PATCH_ID", "row", "col", "event", "doy", "event_date",
+        "ndvi_drop", "neighbour_support", "baseline_confidence", "child_support",
+        "ndii_drop", "swir_rise", "spectral_code", "spectral_offset_days",
+        "miletich_flag", "gap_before", "gap_after", "local_observation_count",
+        "pre_range", "pre_stable", "recovery_strength", "observation_density_score",
+        "signal_quality_score", "event_confidence", "event_class",
+    ]
+    events_final = pd.DataFrame(event_rows, columns=event_columns)
 
     pixel_event_conf_mean = np.full((height, width), np.nan, dtype=np.float32)
     pixel_conf_class = np.zeros((height, width), dtype=np.float32)
@@ -938,9 +1125,9 @@ def finalize_patch(patch_id: str, grass_file: Path, baseline_tif: Path, indices2
             dst.write(arr.astype(np.float32), i)
             dst.set_band_description(i, name)
         dst.update_tags(
-            PRODUCT="Grassland mowing final product candidate", VERSION="v0.1",
+            PRODUCT="Grassland mowing final product", VERSION="v0.3",
             PATCH_ID=str(patch_id), YEAR=str(YEAR), STATUS="Operational evidence score; not calibrated probability",
-            EVENT_CONFIDENCE_FORMULA="(BASELINE_CONFIDENCE + CHILD_SUPPORT + SPECTRAL_SCORE) / 3",
+            EVENT_CONFIDENCE_FORMULA="0.30*SIGNAL_QUALITY + 0.25*OBS_DENSITY + 0.20*CHILD_SUPPORT + 0.25*SPECTRAL_SCORE (renormalized if missing)",
             SPECTRAL_SCORE="0=none;50=one of NDII_down/SWIR_up;100=both",
             CONF_CLASS_1="low: score <40", CONF_CLASS_2="moderate: 40<=score<60",
             CONF_CLASS_3="high: 60<=score<80 or >=80 without both spectral directions",
@@ -980,7 +1167,7 @@ def finalize_patch(patch_id: str, grass_file: Path, baseline_tif: Path, indices2
             dst.write(arr.astype(np.float32), i)
             dst.set_band_description(i, name)
         dst.update_tags(
-            PRODUCT="Grassland mowing diagnostic companion", VERSION="v0.1", PATCH_ID=str(patch_id), YEAR=str(YEAR),
+            PRODUCT="Grassland mowing diagnostic companion", VERSION="v0.3", PATCH_ID=str(patch_id), YEAR=str(YEAR),
             SPECTRAL_CODE="0=none;1=NDII_down;2=SWIR_up;3=both",
             MILETICH_FLAG="1 when NDVI_DROP>0.20 and SWIR_RISE>0",
             EVENT_RESPONSE_PRE_WINDOW=f"{PRE_START_DAYS} to {PRE_END_DAYS} days before event",

@@ -14,6 +14,8 @@ flowchart TD
     E --> F[Finalization: spatial support, NDII/SWIR responses, evidence scores]
     D --> F
     F --> I[Spatial and temporal results: counts, day of year, diagnostics]
+    I --> P[Delivery exports: raw count, per-date SEIVE, confidence-aware harmonization]
+    P --> J
     I --> J[GeoTIFF rasters and CSV event tables]
     I --> K[QA and tile summaries in CSV and GeoPackage]
     K --> M[Count mosaic]
@@ -45,3 +47,7 @@ signal and spectral/spatial support; they must be described as evidence scores,
 not validated probabilities. Event dates are inferred from sampled time series,
 not exact observed times of farm operations. GeoPackage output represents tile
 summaries, while mowing counts/dates remain pixel-level raster and CSV products.
+
+The v0.3 delivery profile exports twelve single-band rasters. Original DOY slots
+are retained; SEIVE count is computed from separately filtered date layers and
+does not replace the original dates or confidence. See [products](products.md).

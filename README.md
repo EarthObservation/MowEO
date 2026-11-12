@@ -6,7 +6,7 @@
 
 MowEO connects area selection, 5 km tiling, cloud preprocessing, annual NetCDF
 acquisition, local grassland mowing detection, quality assessment and geospatial
-export in one Python package. Version **0.2.0a2** is a prerelease.
+export in one Python package. Version **0.3.0a1** is a prerelease.
 License selection is pending; see [LICENSE_NOTICE.md](LICENSE_NOTICE.md).
 
 ![MowEO architecture](docs/architecture.svg)
@@ -116,6 +116,12 @@ shortcuts for source checkouts.
 
 ## Data and parameters
 
+This release uses the delivery-reference v0.3 detector, including event-local
+quality scoring, `grow_r=1.3`, SEIVE and confidence-aware harmonization. It
+changes the detector and evidence score relative to MowEO 0.2.x. See
+[products, method differences and migration](docs/products.md); existing 0.2.x
+projects must be deliberately migrated and locally recalculated.
+
 The collection is `SENTINEL2_L2A` on
 `https://openeo.dataspace.copernicus.eu`; arbitrary collection switching is not
 implemented. Cloud preprocessing applies SCL dilation masking and computes
@@ -149,7 +155,14 @@ my_project/workspace/<YEAR>/
     national_qa_<YEAR>.csv
     national_analysis_<YEAR>/        # summary tables and figures
     national_maps/
-      AREA_MOWING_COUNT_<YEAR>_detection_plus5m.tif
+      AREA_MOWING_COUNT_<YEAR>.tif
+      AREA_MOWING_COUNT_SEIVE_<YEAR>.tif
+      AREA_MOWING_COUNT_SPATIAL_HARMONIZED_<YEAR>.tif
+      AREA_MOWING_DOY_1_<YEAR>.tif ... AREA_MOWING_DOY_6_<YEAR>.tif
+      AREA_MOWING_CONFIDENCE_<YEAR>.tif
+      AREA_VALID_OBSERVATIONS_<YEAR>.tif
+      AREA_SCL_MASKED_PERCENT_<YEAR>.tif
+      products_manifest.json
       AREA_TILE_QA_<YEAR>.gpkg
   provenance/                       # settings, versions and process graphs
 ```
@@ -157,6 +170,9 @@ my_project/workspace/<YEAR>/
 The count mosaic uses `0` for grass pixels with no detected mowing, `1–6` for
 detected counts and `255` for NoData. Per-tile float rasters use `-9999` as
 NoData; band descriptions identify counts, day-of-year dates and diagnostics.
+The twelve single-band raster products match the delivery inventory. DOY 1–6
+are original date slots; SEIVE is a separate count derived from filtered dates.
+Confidence uses rounded UInt8 0–100 with NoData 255 and is not a probability.
 GeoPackage output contains tile-level QA summaries, not vectorized mowing
 pixels or field boundaries. `output_prefix` controls the `AREA` prefix.
 
@@ -192,7 +208,11 @@ dry-run acquisition, detection, reports, GeoTIFF/CSV/GeoPackage outputs and
 rejection of incomplete mosaics. Temporary examples are removed afterward.
 This verifies software behavior, not scientific detection accuracy.
 
-Both tests passed on Windows/Python 3.13.5 from source and an installed wheel.
+All three tests passed on Windows/Python 3.13.5 from source and an installed
+0.3.0a1 wheel. A ten-tile real-data pilot for 2026 was also locally recalculated;
+its SEIVE, harmonization and rounded confidence outputs matched the reference
+export functions pixel-for-pixel. This is an implementation check, not an
+independent scientific accuracy assessment. See the release notes for details.
 The documented Python 3.11 Conda environment has not been executed here; CI
 targets Python 3.11 on Windows and Linux but has not yet run on GitHub.
 macOS has not been tested. See [release notes](RELEASE_NOTES.md) for versions.
@@ -220,5 +240,6 @@ archival remain separate release tasks. See [release status](docs/release_status
 - [AOI and country workflow](docs/aoi_workflow.md)
 - [Grassland input specification](data/README.md)
 - [Parameters](docs/parameters.md)
+- [Delivery-reference products and migration](docs/products.md)
 - [Release notes](RELEASE_NOTES.md)
 - [Planned explanatory figures](docs/figures/README.md)

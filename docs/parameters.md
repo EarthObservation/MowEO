@@ -13,6 +13,8 @@ its example year and EPSG are not requirements for all projects.
 | `target_epsg` | 32633 | User-selected projected CRS in metres. |
 | `patch_size_m` | 5000 | Fixed supported tile size. |
 | `workspace_base` | `workspace` | Year-separated cubes, products, logs and provenance. |
+| `processing_subdir` | `processing` | Output subdirectory within the year workspace; use a different name for detector migration while reusing acquisition. |
+| `detector_profile` | `delivery_v0_3` | Required current detector profile; old projects must be migrated. |
 | `patch_gpkg` | `data/EOPatch_PET.gpkg` | Full-square tile grid with unique IDs. |
 | `patch_layer` | null | First GeoPackage layer unless specified. |
 | `patch_selection_file` | `data/patch_ids.txt` | Optional acquisition-only subset; use `init-aoi --limit` for a persistent full-project subset. |
@@ -42,7 +44,7 @@ workspace; existing products are not invalidated by a parameter fingerprint.
 | Setting | Default | Role |
 |---|---|---|
 | `drop_thr` | 0.093 | NDVI drop threshold. |
-| `grow_r` | 1.4 | Multiplier for the regrowth threshold. |
+| `grow_r` | 1.3 | Multiplier for the regrowth threshold in the delivery reference. |
 | `min_ndvi_valid` | null | Optional lower bound on valid NDVI observations. |
 | `min_event_spacing_days` | 15 | Spacing rule for retained candidate events. |
 | `rapid_rebound_days` | 5 | Rapid-rebound rejection window. |
@@ -52,7 +54,10 @@ workspace; existing products are not invalidated by a parameter fingerprint.
 | `event_before_days`, `event_after_days` | 4, 10 | Spectral event-response window around the inferred date. |
 | `child_date_tolerance_days` | 5 | Date tolerance for 10 m child-pixel support. |
 | `max_events` | 6 | Fixed supported event-slot count, not a freely variable raster schema. |
-| `baseline_version`, `final_version` | `v1_1`, `v0_1` | Product filename labels; changing labels alone does not change the algorithm. |
+| `baseline_version`, `final_version` | `v1_3`, `v0_3` | Required schema labels for the current profile; not a migration by renaming. |
+| `event_confirm_pre_window_days`, `event_confirm_pre_min_obs` | 30, 2 | Pre-event support window and minimum observations. |
+| `event_confirm_pre_range_max`, `event_confirm_start_median_tol` | 0.25, 0.06 | Pre-event stability evidence; not a hard rejection rule. |
+| `local_obs_window_days` | 20 | Event-local observation-density window half-width. |
 
 These defaults are project-calibrated parameters, not a universal mowing model.
 Detector changes require deliberate recalculation and independent validation.

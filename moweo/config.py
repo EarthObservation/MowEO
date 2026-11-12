@@ -45,7 +45,11 @@ WORKSPACE_BASE = _path(SETTINGS.get("workspace_base", "workspace"))
 YEAR_ROOT = WORKSPACE_BASE / str(YEAR)
 ACQUISITION_ROOT = YEAR_ROOT / "acquisition"
 RAW_PROCESS_ROOT = ACQUISITION_ROOT / "process_eopatch"
-ROOT = YEAR_ROOT / "processing"
+PROCESSING_SUBDIR = str(SETTINGS.get('processing_subdir', 'processing'))
+import re
+if not re.fullmatch(r'[A-Za-z0-9_-]+', PROCESSING_SUBDIR) or PROCESSING_SUBDIR == 'acquisition':
+    raise ValueError('processing_subdir must be a simple directory name distinct from acquisition.')
+ROOT = YEAR_ROOT / PROCESSING_SUBDIR
 PROCESS_ROOT = ROOT / "process_eopatch"
 
 DATA_DIR = PROJECT_DIR / "data"
@@ -93,7 +97,7 @@ if not re.fullmatch(r'[A-Za-z0-9_-]+', OUTPUT_PREFIX):
 
 # Detector parameters frozen after the project pilot.
 DROP_THR = float(SETTINGS.get("drop_thr", 0.093))
-GROW_R = float(SETTINGS.get("grow_r", 1.4))
+GROW_R = float(SETTINGS.get("grow_r", 1.3))
 MIN_NDVI_VALID = SETTINGS.get("min_ndvi_valid", None)
 MIN_EVENT_SPACING_DAYS = int(SETTINGS.get("min_event_spacing_days", 15))
 RAPID_REBOUND_DAYS = int(SETTINGS.get("rapid_rebound_days", 5))
@@ -106,8 +110,15 @@ EVENT_BEFORE_DAYS = int(SETTINGS.get("event_before_days", 4))
 EVENT_AFTER_DAYS = int(SETTINGS.get("event_after_days", 10))
 CHILD_DATE_TOLERANCE = int(SETTINGS.get("child_date_tolerance_days", 5))
 
-BASELINE_VERSION = str(SETTINGS.get("baseline_version", "v1_1"))
-FINAL_VERSION = str(SETTINGS.get("final_version", "v0_1"))
+BASELINE_VERSION = str(SETTINGS.get("baseline_version", "v1_3"))
+FINAL_VERSION = str(SETTINGS.get("final_version", "v0_3"))
+if SETTINGS.get('detector_profile') != 'delivery_v0_3' or BASELINE_VERSION != 'v1_3' or FINAL_VERSION != 'v0_3':
+    raise ValueError('This release requires detector_profile=delivery_v0_3, baseline_version=v1_3 and final_version=v0_3. Migrate an older project into a separate processing directory before recalculation.')
+EVENT_CONFIRM_PRE_WINDOW_DAYS = int(SETTINGS.get('event_confirm_pre_window_days', 30))
+EVENT_CONFIRM_PRE_MIN_OBS = int(SETTINGS.get('event_confirm_pre_min_obs', 2))
+EVENT_CONFIRM_PRE_RANGE_MAX = float(SETTINGS.get('event_confirm_pre_range_max', 0.25))
+EVENT_CONFIRM_START_MEDIAN_TOL = float(SETTINGS.get('event_confirm_start_median_tol', 0.06))
+LOCAL_OBS_WINDOW_DAYS = int(SETTINGS.get('local_obs_window_days', 20))
 
 PROCESS_LOG = Path(os.environ.get("MOWING_PROCESS_LOG", str(ROOT / f"national_processing_{YEAR}.csv")))
 FINALIZE_LOG = Path(os.environ.get("MOWING_FINALIZE_LOG", str(ROOT / f"national_finalize_{YEAR}.csv")))

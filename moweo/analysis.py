@@ -180,7 +180,7 @@ def cache_is_current(path: Path, event_file: Path, mask_file: Path) -> bool:
 
 
 def event_file_for(root: Path, patch_id: str, year: int) -> Path:
-    return root / "process_eopatch" / patch_id / f"{patch_id}_MOWING_FINAL_events_v0_1_{year}.csv"
+    return root / "process_eopatch" / patch_id / f"{patch_id}_MOWING_FINAL_events_{cfg.FINAL_VERSION}_{year}.csv"
 
 
 def stats_mask_for(stats_root: Path, patch_id: str) -> Path:
@@ -736,6 +736,7 @@ def main() -> None:
         mismatches = checks[checks["STATUS"] != "OK"]
         if len(mismatches):
             print(f"WARNING: {len(mismatches)} event-scan checks are not OK. See event_scan_checks_{year}.csv")
+            raise RuntimeError('Event table scan is incomplete or inconsistent with QA; inspect event_scan_checks before publishing reports.')
 
     write_report_summary(out / f"national_summary_{year}.txt", national, event_total, year)
 
